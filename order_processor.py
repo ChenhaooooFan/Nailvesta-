@@ -42,9 +42,13 @@ def _classify_live_orders(df: pd.DataFrame) -> pd.Series:
         return pd.Series(False, index=df.index)
 
     # ── 1. Time window ───────────────────────────────────────────────────────
-    raw = pd.to_datetime(df[TIME_COL], errors="coerce")
+    # TikTok Shop CSV: "06/14/2026 11:25:41 PM" (UTC, may have trailing whitespace)
+    cleaned = df[TIME_COL].astype(str).str.strip()
+    raw = pd.to_datetime(cleaned, format="%m/%d/%Y %I:%M:%S %p", errors="coerce")
+    if raw.isna().all():
+        raw = pd.to_datetime(cleaned, errors="coerce")
     if raw.dt.tz is None:
-        raw = raw.dt.tz_localize("UTC")   # TikTok Shop CSV exports are UTC
+        raw = raw.dt.tz_localize("UTC")
     dt_la  = raw.dt.tz_convert(LA)
     hr     = dt_la.dt.hour + dt_la.dt.minute / 60
     in_win = ((hr >= 10.5) & (hr < 18.0)) | ((hr >= 19.0) & (hr < 23.0))

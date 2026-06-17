@@ -517,7 +517,9 @@ if st.button(
     ls = order_m.get("live_store_split", {})
     st.markdown('<div class="section-tag">🎙️ 直播 vs 店铺 分渠道分析</div>', unsafe_allow_html=True)
 
-    if not ls.get("has_time_col"):
+    if "has_time_col" not in ls:
+        st.info("ℹ️ 重新生成周报后此区块将显示直播 vs 店铺分渠道数据。")
+    elif not ls.get("has_time_col"):
         st.warning("⚠️ 订单 CSV 中未找到 Created Time 列，无法分渠道分析。")
     else:
         lm = ls.get("live")  or {}
