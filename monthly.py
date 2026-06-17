@@ -89,8 +89,8 @@ def aggregate_from_weeks(week_nums: list[int]) -> dict | None:
     gmv              = _sum("gmv")
     order_amount_total = _sum("order_amount_total")
 
-    # Weighted rates (from totals, not avg of rates)
-    cancel_rate  = cancelled_orders / paid_base if paid_base else None
+    # Weighted rates（SKU件数口径，与 process_orders 一致）
+    cancel_rate  = items_canceled / items_sold if items_sold else None
     return_rate  = (items_canceled + items_returned) / items_sold if items_sold else None
     aov          = gmv / effective_orders if effective_orders else None
     asp          = gmv / sku_sold if sku_sold else None

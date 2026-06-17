@@ -350,9 +350,12 @@ def generate_report(
     auction: dict,
     collection: dict,
     prev_week: dict | None = None,
-    monthly_baseline: dict | None = None,  # last month average metrics
-    may_baseline: dict | None = None,      # legacy, same as monthly_baseline if provided
+    monthly_baseline: dict | None = None,
+    may_baseline: dict | None = None,      # legacy
     catalog_df=None,
+    b_chain: dict | None = None,
+    new_styles: dict | None = None,
+    supplier_data: list | None = None,
 ) -> bytes:
     """
     Build the full weekly ops docx report and return as bytes.
@@ -433,7 +436,7 @@ def generate_report(
                 ["有效付费订单", _int(m["effective_orders"]), _int(pw.get("effective_orders")), _wow(m["effective_orders"], pw.get("effective_orders"))[0]],
                 ["0 元达人单", _int(m["zero_orders"]), "—", "—"],
                 ["Cancelled 订单", _int(m["cancelled_orders"]), _int(pw.get("cancelled_orders")), _wow(m["cancelled_orders"], pw.get("cancelled_orders"), invert=True)[0]],
-                ["Cancel Rate（付费口径）", _pct(m["cancel_rate"]), _pct(pw.get("cancel_rate")), (cr_txt, {"color": cr_col, "bold": True})],
+                ["Cancel Rate（SKU件数口径）", _pct(m["cancel_rate"]), _pct(pw.get("cancel_rate")), (cr_txt, {"color": cr_col, "bold": True})],
                 ["Return Rate（NailVesta 口径）", _pct(m["return_rate"]), _pct(pw.get("return_rate")), (rr_txt, {"color": rr_col, "bold": True})],
                 ["GMV（SKU Sub，不含运费）", _money(m["gmv"], 0), _money(pw.get("gmv"), 0), (gmv_txt, {"color": gmv_col})],
                 ["AOV（有效订单，不含运费）", _money(m["aov"]), _money(pw.get("aov")), _wow(m["aov"], pw.get("aov"))[0]],
@@ -452,7 +455,8 @@ def generate_report(
     rb.note(
         f"口径：有效付费订单 = 全量订单 {_int(m['total_orders'])} − 0元达人单 {_int(m['zero_orders'])} "
         f"− Cancelled {_int(m['cancelled_orders'])} = {_int(m['effective_orders'])}。"
-        f"GMV = SKU Subtotal After Discount（不含运费）。Cancel Rate 分母 = 全量 − 0元单 = {_int(m['paid_base'])}。"
+        f"GMV = SKU Subtotal After Discount（不含运费）。"
+        f"Cancel Rate 与 Return Rate 均为 SKU 件数口径，分母 = Items Sold = {_int(m['items_sold'])} 件。"
     )
 
     rb.h2("1.1 订单结构明细（含0元单与取消记录）")
@@ -474,7 +478,7 @@ def generate_report(
              (_pct(m["effective_orders"]/m["total_orders"]), {"bold": True}),
              _int(pw.get("effective_orders")),
              f"~{_int(_mb_eff_w)}/周" if _mb_eff_w else "—"],
-            [("Cancel Rate（付费口径）", {"bold": True}),
+            [("Cancel Rate（SKU件数口径）", {"bold": True}),
              (_pct(m["cancel_rate"]), {"bold": True, "color": C["good"] if (not _mb_cr_11 or m["cancel_rate"] < _mb_cr_11) else C["bad"]}),
              "—",
              _pct(pw.get("cancel_rate")),
@@ -614,6 +618,14 @@ def generate_report(
         ],
         col_widths_cm=[2.5, 2.5, 2, 2.5, 2, 5.5],
     )
+    rb.insight_box(
+        f"▶ 下一节「取消分析」与「退货分析」深入拆解 Return Rate（{_pct(m['return_rate'])}）的两个分子："
+        f"本周 Items Canceled {_int(m['items_canceled'])} 件（来自取消订单）+ "
+        f"Items Returned {_int(m['items_returned'])} 件（来自退货报告）= "
+        f"分子合计 {_int(m['items_canceled'] + m['items_returned'])} 件，"
+        f"两节应联合阅读以定位高退货率根因。",
+        fill="noteFill"
+    )
 
     rb.page_break()
 
@@ -680,6 +692,13 @@ def generate_report(
              for r in cr["collection_cancel"][:12]],
             col_widths_cm=[8, 2.5, 6.5],
         )
+    rb.insight_box(
+        f"▶ 取消件数（Items Canceled {_int(m['items_canceled'])} 件）已计入 Return Rate 分子。"
+        f"以下退货分析聚焦退货报告口径（Items Returned {_int(m['items_returned'])} 件），"
+        f"两者合并构成本周综合退货率 {_pct(m['return_rate'])}。"
+        f"若取消率已趋稳，退货端原因将是下周优化重点。",
+        fill="noteFill"
+    )
 
     rb.page_break()
 
@@ -752,6 +771,11 @@ def generate_report(
              for r in ret["collection_returns"][:12]],
             col_widths_cm=[8, 2.5, 6.5],
         )
+    rb.insight_box(
+        "▶ Auction 为独立付款渠道（顾客竞拍后支付），其取消原因以「逾期未付」为主，"
+        "口径与全店 Cancel Rate 分母不同——以下 Auction 数据来自专线 HTML 报告，不纳入全店口径，仅作渠道健康度参考。",
+        fill="noteFill"
+    )
 
     rb.page_break()
 
@@ -773,6 +797,11 @@ def generate_report(
             ["取消原因构成", auc.get("cancel_reason", "—"), "—", "—"],
         ],
         col_widths_cm=[5, 3, 3, 6],
+    )
+    rb.insight_box(
+        "▶ Collection 链接是所有渠道（达人带货、官号视频、直播间）的商品落地页。"
+        "以下分析各链接在退货与取消两个维度的分布，可识别哪类链接/渠道组合带来的质量问题最集中。",
+        fill="noteFill"
     )
 
     rb.page_break()
@@ -810,22 +839,264 @@ def generate_report(
             col_widths_cm=[4, 2.5, 3, 2.5, 5],
         )
 
+    rb.insight_box(
+        "▶ 以下三节（B链专项 / 新款表现 / 供应商分析）均使用与全店一致的 SKU 件数口径，"
+        "可直接与第一节核心指标横向对比。如未上传产品图册，新款与供应商章节将跳过。",
+        fill="noteFill"
+    )
     rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 六、数据范围与口径说明
+    # 六、B链产品表现
     # ═══════════════════════════════════════════════════════════════════════
-    rb.h1("六、数据范围与口径说明")
+    bchain = b_chain or {}
+    if bchain.get("has_data"):
+        rb.h1("六、B链产品表现")
+        rb.note(
+            "B链定义：Seller SKU 前缀为 NOB / NVT。"
+            "口径与全店一致：有效订单 = 付费订单 − Cancelled；"
+            "Return Rate = (Items Canceled + Items Returned) ÷ Items Sold（SKU件数级别，一行一件）。"
+            "「整单 Order Amount (Z列)」含该订单所有 A链+B链 商品的总支付金额；"
+            "「B链 SKU 贡献」= 仅 B链 行的 SKU Subtotal After Discount。"
+        )
+
+        rb.h2("6.1 销量总览")
+        rb.table(
+            ["指标", "本周", "备注"],
+            [
+                [("有效订单数", {"bold": True}), (_int(bchain["effective_orders"]), {"bold": True}), "付费非取消，含B链SKU的订单"],
+                ["Cancelled 订单", _int(bchain["cancelled_orders"]), ""],
+                ["全量（付费）", _int(bchain["total_orders"]), "含取消"],
+                [("Items Sold (SKU件数)", {"bold": True}), _int(bchain["items_sold"]), "B链行 Quantity 合计，付费订单"],
+                ["Items Canceled", _int(bchain["items_canceled"]), "取消订单中B链件数"],
+                ["Items Returned", _int(bchain["items_returned"]), "退货报告或CSV Sku Qty of return"],
+                [("Return Rate", {"bold": True}),
+                 (_pct(bchain["return_rate"]), {"bold": True,
+                    "color": C["good"] if (bchain["return_rate"] is None or bchain["return_rate"] < 0.08) else C["bad"]}),
+                 f"=({_int(bchain['items_canceled'])}+{_int(bchain['items_returned'])})÷{_int(bchain['items_sold'])}"],
+                ["B链 SKU GMV（折后不含运费）", _money(bchain["b_gmv"]), "仅B链行 SKU Subtotal After Discount 合计"],
+            ],
+            col_widths_cm=[5.0, 3.5, 8.5],
+        )
+
+        rb.h2("6.2 按 SKU 型号拆分")
+        rb.table(
+            ["SKU", "款式/规格", "有效订单", "Cancelled", "Items Sold", "Return Rate", "B链 GMV"],
+            [
+                [s["sku"], s["variation"],
+                 _int(s["effective_orders"]), _int(s["cancelled_orders"]),
+                 _int(s["items_sold"]),
+                 _pct(s["return_rate"]) if s["return_rate"] is not None else "0.00%",
+                 _money(s["gmv"])]
+                for s in bchain["sku_breakdown"]
+            ],
+            col_widths_cm=[2.2, 2.8, 2.0, 2.0, 2.0, 2.2, 3.8],
+        )
+
+        rb.h2("6.3 顾客实付明细（Z列 Order Amount）")
+        rb.note(
+            "Order Amount（Z列）= 顾客整单实付，含该订单 A链+B链 全部商品及运费。"
+            "若「整单 vs B链贡献」差值 > $5，说明该顾客同时购买了 A链 商品。"
+        )
+        rb.table(
+            ["Order ID（末8位）", "B链 SKU", "B链件数", "B链 SKU 贡献", "整单 Order Amount (Z)", "差值（A链等）", "支付方式"],
+            [
+                [o["order_id"][-8:], o["skus"], _int(o["b_qty"]),
+                 _money(o["b_sub_after"]),
+                 (_money(o["order_amount"]), {"bold": True}),
+                 _money(o["order_amount"] - o["b_sub_after"]),
+                 o["payment"]]
+                for o in bchain["order_detail"]
+            ],
+            col_widths_cm=[2.5, 2.0, 1.5, 2.2, 2.8, 2.5, 3.5],
+        )
+        avg_diff = (sum(o['order_amount']-o['b_sub_after'] for o in bchain['order_detail'])
+                    / len(bchain['order_detail'])) if bchain.get('order_detail') else 0
+        rb.insight_box(
+            f"本周 B链（{'/'.join(bchain['b_prefixes'])}）共 {_int(bchain['effective_orders'])} 单有效订单，"
+            f"SKU 件数 {_int(bchain['items_sold'])} 件，Return Rate {_pct(bchain['return_rate'])}。"
+            f"B链 SKU GMV {_money(bchain['b_gmv'])}；顾客整单实付平均差值 {_money(avg_diff)}，"
+            f"说明 B链 主要以搭配品形式与 A链 组合购买。",
+            fill="goodFill" if (not bchain.get("return_rate") or bchain["return_rate"] < 0.08) else "badFill"
+        )
+        rb.insight_box(
+            "▶ 以下「新款表现」追踪近28天上新款式的起量速度与质量信号，"
+            "是判断新品是否需要追单或调整选品策略的前置指标。",
+            fill="noteFill"
+        )
+        rb.page_break()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 七、新款表现（近28天上新）
+    # ═══════════════════════════════════════════════════════════════════════
+    ns = new_styles or {}
+    if ns.get("has_data") and ns.get("num_new_styles", 0) > 0:
+        rb.h1(f"七、新款表现（近28天上新，截至 {ns.get('ref_date','')}）")
+        rb.note(
+            f"筛选产品图册中上架时间在近 {ns.get('days',28)} 天内的款式，共 {ns.get('num_new_styles',0)} 个新 SKU。"
+            "顾客实付件单价 = SKU Subtotal After Discount ÷ Quantity（折后，不含运费）；"
+            "原价 = SKU Unit Original Price（CSV M列）；退货率口径与全店一致。"
+        )
+
+        rb.h2("7.1 新款整体汇总")
+        rb.table(
+            ["指标", "数值", "说明"],
+            [
+                [("新款有效订单", {"bold": True}), (_int(ns["effective_orders"]), {"bold": True}), "付费非取消，含新款SKU的订单"],
+                ["Cancelled 订单", _int(ns["cancelled_orders"]), ""],
+                ["Items Sold", _int(ns["items_sold"]), "新款付费订单 SKU 件数合计（含取消件）"],
+                ["Items Canceled", _int(ns["items_canceled"]), "取消订单中新款 SKU 件数"],
+                [("Cancel Rate（SKU件数口径）", {"bold": True}),
+                 (_pct(ns.get("cancel_rate")), {"bold": True,
+                    "color": C["good"] if (ns.get("cancel_rate") is None or ns["cancel_rate"] < 0.04) else C["bad"]}),
+                 f"= Items Canceled {_int(ns['items_canceled'])} ÷ Items Sold {_int(ns['items_sold'])}"],
+                ["Items Returned", _int(ns["items_returned"]), "CSV Sku Quantity of Return 列"],
+                [("Return Rate（SKU件数口径）", {"bold": True}),
+                 (_pct(ns["return_rate"]), {"bold": True,
+                    "color": C["good"] if (ns["return_rate"] is None or ns["return_rate"] < 0.08) else C["bad"]}),
+                 f"= (Canceled {_int(ns['items_canceled'])} + Returned {_int(ns['items_returned'])}) ÷ {_int(ns['items_sold'])}"],
+                ["新款 GMV", _money(ns["gmv"], 0), "有效订单 SKU Subtotal After Discount"],
+            ],
+            col_widths_cm=[4.5, 3.0, 9.5],
+        )
+
+        rb.h2("7.2 逐款表现明细")
+        rb.note("Cancel Rate = SKU Canceled ÷ Items Sold；Return Rate = (SKU Canceled + SKU Returned) ÷ Items Sold；实付件单价 = 折后小计 ÷ 件数（有效订单行）；原价 = SKU Unit Original Price（M列）。")
+        style_rows_report = []
+        for s in ns.get("style_breakdown", []):
+            discount_pct = None
+            if s.get("csv_orig_price") and s.get("paid_unit_price"):
+                discount_pct = 1 - s["paid_unit_price"] / s["csv_orig_price"]
+            cr = s.get("cancel_rate")
+            rr = s.get("return_rate")
+            style_rows_report.append([
+                s["sku"],
+                s["name"],
+                s["listed_date"],
+                (_int(s["effective_orders"]), {"bold": True} if s["effective_orders"] > 0 else {}),
+                _int(s["items_sold"]),
+                _int(s["items_canceled"]),
+                (_pct(cr), {"color": C["bad"]} if (cr and cr > 0.04) else {"color": C["good"]}) if cr is not None else "—",
+                _int(s["items_returned"]),
+                (_pct(rr), {"color": C["bad"]} if (rr and rr > 0.08) else {"color": C["good"]}) if rr is not None else "—",
+                _money(s["csv_orig_price"]) if s.get("csv_orig_price") else (
+                    _money(s["catalog_price"]) if s.get("catalog_price") else "—"),
+                _money(s["paid_unit_price"]) if s.get("paid_unit_price") else "—",
+                _pct(discount_pct) if discount_pct else "—",
+            ])
+        rb.table(
+            ["SKU", "款式英文名", "上架时间", "有效订单", "Items Sold", "Items Canceled",
+             "Cancel Rate", "Items Returned", "Return Rate", "原价", "实付件单价", "折扣率"],
+            style_rows_report,
+            col_widths_cm=[1.8, 2.8, 1.8, 1.6, 1.6, 1.8, 1.8, 1.8, 1.8, 1.5, 1.8, 1.5],
+        )
+
+        # 关联退货原因（从退货报告匹配款式名）
+        new_style_names_lower = {s["name"].lower() for s in ns.get("style_breakdown", []) if s["name"]}
+        matched_ret = [r for r in (returned.get("style_returns") or [])
+                       if any(part in r.get("style","").lower() for part in new_style_names_lower if part)]
+        if matched_ret:
+            rb.h2("7.3 新款关联退货款式（退货报告匹配）")
+            rb.table(
+                ["款式（退货报告）", "退货行数", "占比"],
+                [[r["style"], _int(r["count"]), _pct(r.get("pct"), 1) if r.get("pct") else "—"]
+                 for r in matched_ret[:8]],
+                col_widths_cm=[9, 2.5, 5.5],
+            )
+
+        new_top = ns["style_breakdown"][0] if ns.get("style_breakdown") else None
+        insight_txt = (
+            f"近28天共上架 {ns['num_new_styles']} 款新品，"
+            f"累计有效订单 {_int(ns['effective_orders'])} 单，GMV {_money(ns['gmv'],0)}，"
+            f"综合 Return Rate {_pct(ns['return_rate'])}。"
+        )
+        if new_top and new_top["effective_orders"] > 0:
+            insight_txt += (
+                f" 表现最佳新款：{new_top['name']}（{new_top['sku']}），"
+                f"有效订单 {_int(new_top['effective_orders'])} 单，Return Rate {_pct(new_top['return_rate'])}。"
+            )
+        rb.insight_box(insight_txt, fill="goodFill" if (not ns.get("return_rate") or ns["return_rate"] < 0.10) else "warnFill")
+        rb.insight_box(
+            "▶ 以下「供应商分析」按厂家汇总本周质量与履约表现，可识别高退货率来源并指导选款续单决策。",
+            fill="noteFill"
+        )
+        rb.page_break()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 八、各供应商款式表现
+    # ═══════════════════════════════════════════════════════════════════════
+    sup_list = supplier_data or []
+    if sup_list:
+        rb.h1("八、各供应商款式表现")
+        rb.note(
+            "产品图册「厂家」列与订单 CSV「Seller SKU」精确匹配后按供应商聚合。"
+            "「在售款数」= 产品图册中上架状态不为「已下架」的 SKU 数量；"
+            "「有销量款数」= 本周有效订单中出现的 SKU 数量；退货率口径与全店一致。"
+        )
+
+        rb.h2("8.1 供应商汇总对比")
+        sup_summary_rows = []
+        for sup in sup_list:
+            rr_txt = _pct(sup["return_rate"])
+            rr_color = C["bad"] if (sup["return_rate"] and sup["return_rate"] > 0.10) else C["good"]
+            sup_summary_rows.append([
+                (sup["supplier"], {"bold": True}),
+                _int(sup["effective_orders"]),
+                _int(sup["cancelled_orders"]),
+                _int(sup["items_sold"]),
+                _int(sup["items_returned"]),
+                (rr_txt, {"color": rr_color, "bold": True}),
+                _money(sup["gmv"], 0),
+                f"{sup['sold_sku_count']}/{sup['active_sku_count']}",
+            ])
+        rb.table(
+            ["供应商", "有效订单", "Cancelled", "Items Sold", "Items Returned",
+             "退货率", "GMV", "有销量/在售款数"],
+            sup_summary_rows,
+            col_widths_cm=[2.5, 2.0, 2.0, 2.0, 2.2, 2.0, 2.5, 2.8],
+        )
+
+        rb.h2("8.2 各供应商退货款式明细")
+        for sup in sup_list:
+            if not sup.get("return_styles"):
+                continue
+            rb.h3(f"▸ {sup['supplier']}（退货率 {_pct(sup['return_rate'])}，共 {_int(sup['items_returned'])} 件退货）")
+            rb.table(
+                ["SKU", "款式英文名", "退货件数"],
+                [[r["sku"], r["name"] or "—", _int(r["returned"])] for r in sup["return_styles"]],
+                col_widths_cm=[3, 9, 5],
+            )
+
+        # 找退货率最高供应商
+        sup_with_rr = [s for s in sup_list if s.get("return_rate") and s["items_sold"] > 0]
+        if sup_with_rr:
+            worst = max(sup_with_rr, key=lambda x: x["return_rate"])
+            best  = min(sup_with_rr, key=lambda x: x["return_rate"])
+            rb.insight_box(
+                f"退货率最高供应商：{worst['supplier']}（{_pct(worst['return_rate'])}，"
+                f"{_int(worst['items_returned'])} 件退货 / {_int(worst['items_sold'])} 件售出）。"
+                f" 退货率最低：{best['supplier']}（{_pct(best['return_rate'])}）。"
+                f" 建议重点复核 {worst['supplier']} 的退货原因，判断是质检、描述还是尺寸问题。",
+                fill="warnFill" if worst["return_rate"] > 0.12 else "noteFill"
+            )
+        rb.page_break()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 九、数据范围与口径说明
+    # ═══════════════════════════════════════════════════════════════════════
+    rb.h1("九、数据范围与口径说明")
     rb.table(
         ["口径", "本周定义"],
         [
             ["有效付费订单", f"全量 {_int(m['total_orders'])} − 0元单 {_int(m['zero_orders'])} − Cancelled {_int(m['cancelled_orders'])} = {_int(m['effective_orders'])}"],
-            ["Cancel Rate", f"Cancelled / Paid Base = {_int(m['cancelled_orders'])} / {_int(m['paid_base'])} = {_pct(m['cancel_rate'])}"],
-            ["Return Rate", f"(Items Canceled {_int(m['items_canceled'])} + Items Returned {_int(m['items_returned'])}) / Items Sold {_int(m['items_sold'])} = {_pct(m['return_rate'])}"],
+            ["Cancel Rate（SKU件数口径）", f"SKU Canceled / Items Sold = {_int(m['items_canceled'])} / {_int(m['items_sold'])} = {_pct(m['cancel_rate'])}"],
+            ["Return Rate（SKU件数口径）", f"(Items Canceled {_int(m['items_canceled'])} + Items Returned {_int(m['items_returned'])}) / Items Sold {_int(m['items_sold'])} = {_pct(m['return_rate'])}"],
             ["GMV", "SKU Subtotal After Discount（折后，不含运费）"],
             ["AOV", "GMV ÷ 有效付费订单数（不含运费）"],
             ["Items Sold", "所有付费订单（Amount>0）的 Quantity 合计，含已取消订单件数"],
             ["0元达人单", "Order Amount = 0，Payment Method = 空，不计入任何销售指标"],
+            ["顾客实付件单价", "SKU Subtotal After Discount ÷ Quantity（新款章节，有效订单行）"],
+            ["原价", "SKU Unit Original Price（CSV M列）"],
         ],
         col_widths_cm=[4, 13],
     )
@@ -833,9 +1104,9 @@ def generate_report(
     rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 七、综合结论与行动建议
+    # 十、综合结论与行动建议
     # ═══════════════════════════════════════════════════════════════════════
-    rb.h1("七、综合结论与行动建议")
+    rb.h1("十、综合结论与行动建议")
 
     # Auto-generate P0/P1 based on metrics
     p0_items = []
