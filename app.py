@@ -2,6 +2,7 @@
 app.py — NailVesta 中台运营数据周报
 Run with: streamlit run app.py
 """
+from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
