@@ -307,15 +307,21 @@ with st.sidebar:
                 if wm:
                     cr = wm.get('cancel_rate', 0) * 100
                     rr = wm.get('return_rate', 0) * 100
-                    st.markdown(
-                        f'<div class="week-card">'
-                        f'<span class="wnum">W{w}</span> '
-                        f'<span class="wdate">{wm.get("date_range","")}</span>'
-                        f'<div class="wstats">GMV ${wm.get("gmv",0):,.0f} &nbsp;·&nbsp; '
-                        f'Cancel {cr:.2f}% &nbsp;·&nbsp; Return {rr:.2f}%</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
-                    )
+                    col_info, col_del = st.columns([4, 1])
+                    with col_info:
+                        st.markdown(
+                            f'<div class="week-card">'
+                            f'<span class="wnum">W{w}</span> '
+                            f'<span class="wdate">{wm.get("date_range","")}</span>'
+                            f'<div class="wstats">GMV ${wm.get("gmv",0):,.0f} &nbsp;·&nbsp; '
+                            f'Cancel {cr:.2f}% &nbsp;·&nbsp; Return {rr:.2f}%</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    with col_del:
+                        if st.button("🗑️", key=f"del_w{w}", help=f"删除 W{w} 记录"):
+                            (METRICS_DIR / f"W{w}_metrics.json").unlink(missing_ok=True)
+                            st.rerun()
 
 # ─── MAIN AREA ───────────────────────────────────────────────────────────────
 
