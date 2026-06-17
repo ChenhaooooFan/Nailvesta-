@@ -1,0 +1,87 @@
+{
+  "total_orders": 1721,
+  "zero_orders": 334,
+  "zero_sku_units": 337,
+  "cancelled_orders": 44,
+  "paid_base": 1387,
+  "effective_orders": 1343,
+  "cancelled_sku_units": 52,
+  "cancel_rate": 0.03172314347512617,
+  "items_sold": 2015,
+  "items_canceled": 52,
+  "items_returned": 167,
+  "return_rate": 0.1086848635235732,
+  "gmv": 52865.64,
+  "aov": 39.36384214445272,
+  "asp": 26.93104431991849,
+  "sku_sold": 1963,
+  "upo": 1.4616530156366343,
+  "order_amount_total": 57668.979999999996,
+  "aov_incl_shipping": 42.94041697691735,
+  "cancelled_avg_amount": 39.17204545454546,
+  "cancelled_gmv": 1723.5700000000002,
+  "qty_bands": {
+    "1件": {
+      "count": 998,
+      "pct": 0.7431124348473567,
+      "aov": 31.8849498997996
+    },
+    "2件": {
+      "count": 227,
+      "pct": 0.1690245718540581,
+      "aov": 54.87867841409692
+    },
+    "3件": {
+      "count": 45,
+      "pct": 0.03350707371556218,
+      "aov": 86.86133333333333
+    },
+    "4件精确": {
+      "count": 15,
+      "pct": 0.011169024571854059,
+      "aov": 116.60666666666663
+    },
+    "5件+": {
+      "count": 58,
+      "pct": 0.04318689501116903,
+      "aov": 133.31862068965518
+    }
+  },
+  "payment_dist": {
+    "ApplePay": 613,
+    "Credit/debit card": 431,
+    "TikTok PayLater Powered by Klarna": 110,
+    "PayPal": 92,
+    "Google Pay": 32,
+    "Affirm": 21,
+    "ApplePay + TikTok Shop Balance": 10,
+    "Klarna Pay over time": 7,
+    "Credit/debit card + TikTok Shop Balance": 7,
+    "TikTok Shop Balance": 6,
+    "PayPal PayLater": 6,
+    "Venmo": 5,
+    "PayPal PayLater + TikTok Shop Balance": 1,
+    "TikTok PayLater Powered by Klarna + TikTok Shop Balance": 1,
+    "Google Pay + TikTok Shop Balance": 1
+  },
+  "aov_dist": {
+    "<$20": 37,
+    "$20-30": 345,
+    "$30-40": 567,
+    "$40-60": 196,
+    "$60-80": 88,
+    "$80-120": 70,
+    "$120+": 40
+  },
+  "price_gmv": {
+    "≤$29.99": 634.28,
+    "$34.99": 1546.93,
+    "$39.99": 17356.73,
+    "$44.99": 29155.44,
+    "$49.99": 3552.06,
+    "$54.99": 620.2
+  },
+  "total_price_gmv": 52865.64,
+  "week_num": 24,
+  "date_range": "2026/06/08 – 06/14"
+}
