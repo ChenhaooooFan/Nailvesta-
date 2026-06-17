@@ -513,6 +513,96 @@ if st.button(
                     if prev_metrics and prev_metrics.get('return_rate') is not None else None,
               delta_color="inverse")
 
+    # ─── 直播 vs 店铺 分渠道对比 ──────────────────────────────────────────────
+    ls = order_m.get("live_store_split", {})
+    st.markdown('<div class="section-tag">🎙️ 直播 vs 店铺 分渠道分析</div>', unsafe_allow_html=True)
+
+    if not ls.get("has_time_col"):
+        st.warning("⚠️ 订单 CSV 中未找到 Created Time 列，无法分渠道分析。")
+    else:
+        lm = ls.get("live")  or {}
+        sm = ls.get("store") or {}
+
+        def _pct_str(v):
+            return f"{v*100:.2f}%" if v is not None else "—"
+        def _money_str(v):
+            return f"${v:,.0f}" if v else "—"
+        def _aov_str(v):
+            return f"${v:.2f}" if v else "—"
+
+        # 占比标签
+        total_eff = order_m["effective_orders"] or 1
+        live_pct  = lm.get("effective_orders", 0) / total_eff
+        store_pct = sm.get("effective_orders", 0) / total_eff
+
+        # 5-column highlight row
+        lc1, lc2, lc3, lc4, lc5 = st.columns(5)
+        lc1.metric("🎙️ 直播有效订单",
+                   f"{lm.get('effective_orders', 0):,}",
+                   delta=f"占 {live_pct*100:.1f}%")
+        lc2.metric("🏪 店铺有效订单",
+                   f"{sm.get('effective_orders', 0):,}",
+                   delta=f"占 {store_pct*100:.1f}%")
+        lc3.metric("🎙️ 直播 Cancel Rate",
+                   _pct_str(lm.get("cancel_rate")),
+                   delta=f"{(lm.get('cancel_rate',0) - order_m['cancel_rate'])*100:+.2f}pp vs 全店"
+                         if lm.get("cancel_rate") is not None else None,
+                   delta_color="inverse")
+        lc4.metric("🏪 店铺 Cancel Rate",
+                   _pct_str(sm.get("cancel_rate")),
+                   delta=f"{(sm.get('cancel_rate',0) - order_m['cancel_rate'])*100:+.2f}pp vs 全店"
+                         if sm.get("cancel_rate") is not None else None,
+                   delta_color="inverse")
+        lc5.metric("直播/店铺 Cancel Δ",
+                   f"{(lm.get('cancel_rate',0) - sm.get('cancel_rate',0))*100:+.2f}pp"
+                   if lm.get("cancel_rate") is not None and sm.get("cancel_rate") is not None else "—",
+                   delta=None)
+
+        # 详细对比表
+        compare_df = pd.DataFrame({
+            "指标":     ["有效订单", "GMV", "AOV", "SKU Sold",
+                         "Items Sold", "Items Canceled", "Items Returned",
+                         "Cancel Rate", "Return Rate"],
+            "🎙️ 直播出单": [
+                f"{lm.get('effective_orders', 0):,}",
+                _money_str(lm.get("gmv")),
+                _aov_str(lm.get("aov")),
+                f"{lm.get('sku_sold', 0):,}",
+                f"{lm.get('items_sold', 0):,}",
+                f"{lm.get('items_canceled', 0):,}",
+                f"{lm.get('items_returned', 0):,}",
+                _pct_str(lm.get("cancel_rate")),
+                _pct_str(lm.get("return_rate")),
+            ],
+            "🏪 店铺出单": [
+                f"{sm.get('effective_orders', 0):,}",
+                _money_str(sm.get("gmv")),
+                _aov_str(sm.get("aov")),
+                f"{sm.get('sku_sold', 0):,}",
+                f"{sm.get('items_sold', 0):,}",
+                f"{sm.get('items_canceled', 0):,}",
+                f"{sm.get('items_returned', 0):,}",
+                _pct_str(sm.get("cancel_rate")),
+                _pct_str(sm.get("return_rate")),
+            ],
+            "全店合计": [
+                f"{order_m['effective_orders']:,}",
+                f"${order_m['gmv']:,.0f}",
+                f"${order_m['aov']:.2f}" if order_m['aov'] else "—",
+                f"{order_m['sku_sold']:,}",
+                f"{order_m['items_sold']:,}",
+                f"{order_m['items_canceled']:,}",
+                f"{order_m['items_returned']:,}",
+                _pct_str(order_m.get("cancel_rate")),
+                _pct_str(order_m.get("return_rate")),
+            ],
+        })
+        st.dataframe(compare_df, use_container_width=True, hide_index=True)
+        st.caption(
+            "直播出单判断：LA时间 10:30–18:00 或 19:00–23:00 ＋ 订单内所有SKU折扣 ≥35%（实付÷原价 ≤65%）。"
+            "Returns 数据取自订单CSV的『Sku Quantity of return』列（与HTML退货报告可能有微小差异）。"
+        )
+
     # ─── 订单结构 & 件数 ─────────────────────────────────────────────────────
     st.markdown('<div class="section-tag">📋 订单口径明细</div>', unsafe_allow_html=True)
     col_a, col_b = st.columns(2)

@@ -17,6 +17,123 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 
+# ─── LIVE-ORDER CLASSIFICATION ────────────────────────────────────────────────
+
+def _classify_live_orders(df: pd.DataFrame) -> pd.Series:
+    """
+    Returns a boolean Series (same index as df): True = row belongs to a live-stream order.
+
+    Live order criteria — BOTH must hold at the ORDER level:
+      1. Created Time (converted to LA/Pacific) falls within 10:30–18:00 or 19:00–23:00.
+      2. Every SKU line in the order has unit paid price ≤ 65 % of original price
+         (i.e. discount ≥ 35 % off).
+         unit_paid  = SKU Subtotal After Discount ÷ Quantity
+         unit_orig  = SKU Unit Original Price
+    """
+    from zoneinfo import ZoneInfo
+    LA = ZoneInfo("America/Los_Angeles")
+
+    TIME_COL = "Created Time"
+    M_COL    = "SKU Unit Original Price"       # original (M column)
+    Q_COL    = "SKU Subtotal After Discount"   # paid subtotal (Q column)
+    QTY_COL  = "Quantity"
+
+    if TIME_COL not in df.columns:
+        return pd.Series(False, index=df.index)
+
+    # ── 1. Time window ───────────────────────────────────────────────────────
+    raw = pd.to_datetime(df[TIME_COL], errors="coerce")
+    if raw.dt.tz is None:
+        raw = raw.dt.tz_localize("UTC")   # TikTok Shop CSV exports are UTC
+    dt_la  = raw.dt.tz_convert(LA)
+    hr     = dt_la.dt.hour + dt_la.dt.minute / 60
+    in_win = ((hr >= 10.5) & (hr < 18.0)) | ((hr >= 19.0) & (hr < 23.0))
+
+    # ── 2. Discount ≥ 35 % off per SKU row ──────────────────────────────────
+    if not all(c in df.columns for c in [M_COL, Q_COL, QTY_COL]):
+        return pd.Series(False, index=df.index)
+
+    qty       = pd.to_numeric(df[QTY_COL], errors="coerce").replace(0, np.nan)
+    unit_paid = pd.to_numeric(df[Q_COL],   errors="coerce") / qty
+    unit_orig = pd.to_numeric(df[M_COL],   errors="coerce").replace(0, np.nan)
+    disc_ok   = (unit_paid / unit_orig) <= 0.65
+
+    tmp = df.assign(_win=in_win.values, _disc=disc_ok.fillna(False).values)
+
+    # ── 3. Order-level gate: time (first row) + ALL SKUs pass discount ───────
+    grp        = tmp.groupby("Order ID")
+    order_win  = grp["_win"].first()
+    order_disc = grp["_disc"].all()
+    live_ids   = order_win.index[order_win & order_disc]
+
+    return df["Order ID"].isin(live_ids)
+
+
+def _segment_metrics(df_sub: pd.DataFrame) -> dict:
+    """
+    Compute core metrics for a subset of the raw order CSV.
+    Mirrors the key calculations in process_orders().
+    """
+    _empty = {
+        "effective_orders": 0, "cancelled_orders": 0, "paid_base": 0,
+        "items_sold": 0, "items_canceled": 0, "items_returned": 0,
+        "cancel_rate": None, "return_rate": None,
+        "gmv": 0.0, "aov": None, "sku_sold": 0,
+    }
+    if df_sub.empty:
+        return _empty
+
+    order = df_sub.groupby("Order ID").agg(
+        status  = ("Order Status",                "first"),
+        amount  = ("Order Amount",                "first"),
+        qty     = ("Quantity",                    "sum"),
+        sku_sub = ("SKU Subtotal After Discount", "sum"),
+    ).reset_index()
+
+    is_paid      = order["amount"] > 0
+    is_cancelled = order["status"] == "Canceled"
+    is_effective = is_paid & ~is_cancelled
+
+    eff_count  = int(is_effective.sum())
+    can_count  = int((is_paid & is_cancelled).sum())
+    paid_base  = int(is_paid.sum())
+
+    items_sold     = int(order.loc[is_paid,               "qty"].sum())
+    items_canceled = int(order.loc[is_paid & is_cancelled,"qty"].sum())
+
+    ret_col = "Sku Quantity of return"
+    if ret_col in df_sub.columns:
+        paid_ids = set(order.loc[is_paid, "Order ID"])
+        items_returned = int(
+            pd.to_numeric(
+                df_sub.loc[df_sub["Order ID"].isin(paid_ids), ret_col],
+                errors="coerce",
+            ).fillna(0).sum()
+        )
+    else:
+        items_returned = 0
+
+    cancel_rate = items_canceled / items_sold if items_sold else None
+    return_rate = (items_canceled + items_returned) / items_sold if items_sold else None
+    gmv         = float(order.loc[is_effective, "sku_sub"].sum())
+    aov         = gmv / eff_count if eff_count else None
+    eff_ids     = set(order.loc[is_effective, "Order ID"])
+    sku_sold    = int(df_sub.loc[df_sub["Order ID"].isin(eff_ids), "Quantity"].sum())
+
+    return {
+        "effective_orders": eff_count,
+        "cancelled_orders": can_count,
+        "paid_base":        paid_base,
+        "items_sold":       items_sold,
+        "items_canceled":   items_canceled,
+        "items_returned":   items_returned,
+        "cancel_rate":      cancel_rate,
+        "return_rate":      return_rate,
+        "gmv":              gmv,
+        "aov":              aov,
+        "sku_sold":         sku_sold,
+    }
+
 
 def process_orders(csv_bytes: bytes, items_returned: int = 0) -> dict:
     """
@@ -132,6 +249,28 @@ def process_orders(csv_bytes: bytes, items_returned: int = 0) -> dict:
     zero_order_ids = order.loc[is_zero, "Order ID"]
     zero_sku_units = df.loc[df["Order ID"].isin(zero_order_ids), "Quantity"].sum()
 
+    # ── Live vs Store channel split ──────────────────────────────────────────
+    has_time_col  = "Created Time" in df.columns
+    if has_time_col:
+        live_row_mask = _classify_live_orders(df)
+        live_m  = _segment_metrics(df[live_row_mask])
+        store_m = _segment_metrics(df[~live_row_mask])
+        live_order_pct  = (live_m["effective_orders"]  / effective_orders
+                           if effective_orders else None)
+        store_order_pct = (store_m["effective_orders"] / effective_orders
+                           if effective_orders else None)
+    else:
+        live_m = store_m = None
+        live_order_pct = store_order_pct = None
+
+    live_store_split = {
+        "has_time_col":    has_time_col,
+        "live":            live_m,
+        "store":           store_m,
+        "live_order_pct":  live_order_pct,
+        "store_order_pct": store_order_pct,
+    }
+
     return {
         # ── Volume ──────────────────────────────────────────────────────────
         "total_orders":          int(total_orders),
@@ -170,6 +309,9 @@ def process_orders(csv_bytes: bytes, items_returned: int = 0) -> dict:
         "aov_dist":              aov_dist,
         "price_gmv":             price_gmv,
         "total_price_gmv":       float(total_price_gmv),
+
+        # ── Channel split ────────────────────────────────────────────────────
+        "live_store_split":      live_store_split,
     }
 
 

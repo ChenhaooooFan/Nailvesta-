@@ -847,11 +847,139 @@ def generate_report(
     rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 六、B链产品表现
+    # 六、直播 vs 店铺 分渠道分析
+    # ═══════════════════════════════════════════════════════════════════════
+    ls = m.get("live_store_split", {})
+    rb.h1("六、直播 vs 店铺 分渠道分析")
+
+    if not ls.get("has_time_col"):
+        rb.note("⚠️ 订单CSV中未找到 Created Time 列，本章无法生成。", fill="warnFill")
+    else:
+        lm = ls.get("live")  or {}
+        sm = ls.get("store") or {}
+
+        rb.note(
+            "直播出单判断标准（须同时满足）："
+            "① 订单创建时间（洛杉矶时间）在 10:30–18:00 或 19:00–23:00；"
+            "② 订单内所有 SKU 行：实付件单价 ÷ SKU原价 ≤ 65%（即折扣 ≥ 35% OFF）。"
+            "Returns 数据取自订单CSV的「Sku Quantity of return」列。",
+            fill="noteFill"
+        )
+
+        total_eff   = _int(m.get("effective_orders")) or 1
+        live_eff    = lm.get("effective_orders", 0)
+        store_eff   = sm.get("effective_orders", 0)
+        live_pct    = live_eff  / total_eff
+        store_pct   = store_eff / total_eff
+
+        # 6.1 汇总对比表
+        rb.h2("6.1 核心指标汇总")
+        tbl = rb.doc.add_table(rows=10, cols=4)
+        tbl.style = "Table Grid"
+        _table_borders(tbl)
+
+        HDR = [("指标", 4000), ("🎙️ 直播出单", 2800), ("🏪 店铺出单", 2800), ("全店合计", 2800)]
+        for i, (h, w) in enumerate(HDR):
+            c = tbl.rows[0].cells[i]
+            _set_cell_bg(c, C["header"][0])
+            _cell_para(c, h, bold=True, color=C["header"][1], size_pt=9,
+                       align=WD_ALIGN_PARAGRAPH.CENTER)
+            _set_col_width(c, w)
+
+        def _lrow(row_idx, label, lv, sv, tv, bad_if_live_higher=False):
+            cells = tbl.rows[row_idx].cells
+            if row_idx % 2 == 0:
+                for c in cells: _set_cell_bg(c, C["altrow"])
+            _cell_para(cells[0], label, bold=True, size_pt=9)
+            _cell_para(cells[1], lv, size_pt=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+            _cell_para(cells[2], sv, size_pt=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+            _cell_para(cells[3], tv, size_pt=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+
+        _lrow(1, "有效订单",
+              f"{live_eff:,}  ({live_pct*100:.1f}%)",
+              f"{store_eff:,}  ({store_pct*100:.1f}%)",
+              f"{_int(m.get('effective_orders')):,}")
+        _lrow(2, "GMV（不含运费）",
+              _money(lm.get("gmv")), _money(sm.get("gmv")), _money(m.get("gmv")))
+        _lrow(3, "AOV",
+              _money(lm.get("aov")), _money(sm.get("aov")), _money(m.get("aov")))
+        _lrow(4, "SKU Sold",
+              f"{lm.get('sku_sold',0):,}", f"{sm.get('sku_sold',0):,}",
+              f"{_int(m.get('sku_sold')):,}")
+        _lrow(5, "Items Sold（分母）",
+              f"{lm.get('items_sold',0):,}", f"{sm.get('items_sold',0):,}",
+              f"{_int(m.get('items_sold')):,}")
+        _lrow(6, "Items Canceled",
+              f"{lm.get('items_canceled',0):,}", f"{sm.get('items_canceled',0):,}",
+              f"{_int(m.get('items_canceled')):,}")
+        _lrow(7, "Items Returned",
+              f"{lm.get('items_returned',0):,}", f"{sm.get('items_returned',0):,}",
+              f"{_int(m.get('items_returned')):,}")
+
+        # Cancel Rate row — red if > 4 %
+        lcr, scr = lm.get("cancel_rate"), sm.get("cancel_rate")
+        _lrow(8, "Cancel Rate（SKU口径）",
+              _pct(lcr, 2), _pct(scr, 2), _pct(m.get("cancel_rate"), 2))
+        for col_i, rate in [(1, lcr), (2, scr)]:
+            if rate is not None and rate > 0.04:
+                _set_cell_bg(tbl.rows[8].cells[col_i], C["badFill"])
+
+        # Return Rate row — red if > 8 %
+        lrr, srr = lm.get("return_rate"), sm.get("return_rate")
+        _lrow(9, "Return Rate（SKU口径）",
+              _pct(lrr, 2), _pct(srr, 2), _pct(m.get("return_rate"), 2))
+        for col_i, rate in [(1, lrr), (2, srr)]:
+            if rate is not None and rate > 0.08:
+                _set_cell_bg(tbl.rows[9].cells[col_i], C["badFill"])
+
+        rb.doc.add_paragraph()
+
+        # 6.2 Cancel/Return 差异解读
+        rb.h2("6.2 渠道差异解读")
+        insights = []
+        if lcr is not None and scr is not None:
+            diff_cr = (lcr - scr) * 100
+            if abs(diff_cr) >= 0.5:
+                direction = "高于" if diff_cr > 0 else "低于"
+                insights.append(
+                    f"• Cancel Rate：直播出单（{_pct(lcr,2)}）{direction}店铺出单（{_pct(scr,2)}）"
+                    f" {abs(diff_cr):.2f}pp，"
+                    + ("建议排查直播话术/商品描述与实物的差距。" if diff_cr > 0
+                       else "直播选品/定价策略匹配度较好。")
+                )
+        if lrr is not None and srr is not None:
+            diff_rr = (lrr - srr) * 100
+            if abs(diff_rr) >= 0.5:
+                direction = "高于" if diff_rr > 0 else "低于"
+                insights.append(
+                    f"• Return Rate：直播出单（{_pct(lrr,2)}）{direction}店铺出单（{_pct(srr,2)}）"
+                    f" {abs(diff_rr):.2f}pp。"
+                    + ("关注直播期间主推款的退货原因。" if diff_rr > 0 else "")
+                )
+        if lm.get("aov") and sm.get("aov"):
+            diff_aov = lm["aov"] - sm["aov"]
+            insights.append(
+                f"• AOV：直播出单（{_money(lm['aov'])}）{'高于' if diff_aov >= 0 else '低于'}"
+                f"店铺出单（{_money(sm['aov'])}）${abs(diff_aov):.2f}。"
+            )
+        if not insights:
+            insights.append("• 直播与店铺渠道核心指标差异较小，整体表现一致。")
+
+        for line in insights:
+            p = rb.doc.add_paragraph(line)
+            p.paragraph_format.space_before = Pt(2)
+            p.paragraph_format.space_after  = Pt(2)
+            for run in p.runs:
+                run.font.size = Pt(10)
+
+    rb.page_break()
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # 七、B链产品表现
     # ═══════════════════════════════════════════════════════════════════════
     bchain = b_chain or {}
     if bchain.get("has_data"):
-        rb.h1("六、B链产品表现")
+        rb.h1("七、B链产品表现")
         rb.note(
             "B链定义：Seller SKU 前缀为 NOB / NVT。"
             "口径与全店一致：有效订单 = 付费订单 − Cancelled；"
@@ -927,11 +1055,11 @@ def generate_report(
         rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 七、新款表现（近28天上新）
+    # 八、新款表现（近28天上新）
     # ═══════════════════════════════════════════════════════════════════════
     ns = new_styles or {}
     if ns.get("has_data") and ns.get("num_new_styles", 0) > 0:
-        rb.h1(f"七、新款表现（近28天上新，截至 {ns.get('ref_date','')}）")
+        rb.h1(f"八、新款表现（近28天上新，截至 {ns.get('ref_date','')}）")
         rb.note(
             f"筛选产品图册中上架时间在近 {ns.get('days',28)} 天内的款式，共 {ns.get('num_new_styles',0)} 个新 SKU。"
             "顾客实付件单价 = SKU Subtotal After Discount ÷ Quantity（折后，不含运费）；"
@@ -1023,11 +1151,11 @@ def generate_report(
         rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 八、各供应商款式表现
+    # 九、各供应商款式表现
     # ═══════════════════════════════════════════════════════════════════════
     sup_list = supplier_data or []
     if sup_list:
-        rb.h1("八、各供应商款式表现")
+        rb.h1("九、各供应商款式表现")
         rb.note(
             "产品图册「厂家」列与订单 CSV「Seller SKU」精确匹配后按供应商聚合。"
             "「在售款数」= 产品图册中上架状态不为「已下架」的 SKU 数量；"
@@ -1082,9 +1210,9 @@ def generate_report(
         rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 九、数据范围与口径说明
+    # 十、数据范围与口径说明
     # ═══════════════════════════════════════════════════════════════════════
-    rb.h1("九、数据范围与口径说明")
+    rb.h1("十、数据范围与口径说明")
     rb.table(
         ["口径", "本周定义"],
         [
@@ -1104,9 +1232,9 @@ def generate_report(
     rb.page_break()
 
     # ═══════════════════════════════════════════════════════════════════════
-    # 十、综合结论与行动建议
+    # 十一、综合结论与行动建议
     # ═══════════════════════════════════════════════════════════════════════
-    rb.h1("十、综合结论与行动建议")
+    rb.h1("十一、综合结论与行动建议")
 
     # Auto-generate P0/P1 based on metrics
     p0_items = []
