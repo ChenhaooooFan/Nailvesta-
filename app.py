@@ -201,13 +201,20 @@ with st.sidebar:
     if saved_weeks:
         default_prev = max([w for w in saved_weeks if w < week_num], default=saved_weeks[-1])
         default_idx  = saved_weeks.index(default_prev) if default_prev in saved_weeks else 0
-        compare_week = st.selectbox(
-            "选择对比周次",
-            options=saved_weeks,
-            index=default_idx,
-            format_func=lambda w: f"W{w}  ({load_week_metrics(w).get('date_range','') if load_week_metrics(w) else ''})",
-            label_visibility="collapsed",
-        )
+        col_sel, col_del2 = st.columns([5, 1])
+        with col_sel:
+            compare_week = st.selectbox(
+                "选择对比周次",
+                options=saved_weeks,
+                index=default_idx,
+                format_func=lambda w: f"W{w}  ({load_week_metrics(w).get('date_range','') if load_week_metrics(w) else ''})",
+                label_visibility="collapsed",
+            )
+        with col_del2:
+            st.markdown("<div style='margin-top:4px'></div>", unsafe_allow_html=True)
+            if st.button("🗑️", key="del_compare", help=f"删除当前选中的周次记录"):
+                (METRICS_DIR / f"W{compare_week}_metrics.json").unlink(missing_ok=True)
+                st.rerun()
         prev_metrics = load_week_metrics(compare_week)
         if prev_metrics:
             st.success(f"✅ W{compare_week}（{prev_metrics.get('date_range','')}）")
