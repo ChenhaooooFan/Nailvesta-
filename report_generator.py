@@ -867,7 +867,7 @@ def generate_report(
             fill="noteFill"
         )
 
-        total_eff   = _int(m.get("effective_orders")) or 1
+        total_eff   = m.get("effective_orders") or 1
         live_eff    = lm.get("effective_orders", 0)
         store_eff   = sm.get("effective_orders", 0)
         live_pct    = live_eff  / total_eff
