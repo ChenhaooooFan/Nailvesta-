@@ -853,12 +853,13 @@ def generate_report(
     rb.h1("六、直播 vs 店铺 分渠道分析")
 
     if not ls.get("has_time_col"):
-        rb.note("⚠️ 订单CSV中未找到 Created Time 列，本章无法生成。", fill="warnFill")
+        rb.note("⚠️ 订单CSV中未找到 Created Time 列，本章无法生成。")
     else:
         lm = ls.get("live")  or {}
         sm = ls.get("store") or {}
 
-        rb.note(
+        # ↓ 修复：原来错误地用了 rb.note(..., fill="noteFill")，note() 不接受 fill 参数
+        rb.insight_box(
             "直播出单判断标准（须同时满足）："
             "① 订单创建时间（洛杉矶时间）在 10:30–18:00 或 19:00–23:00；"
             "② 订单内所有 SKU 行：实付件单价 ÷ SKU原价 ≤ 65%（即折扣 ≥ 35% OFF）。"
